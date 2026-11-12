@@ -1,0 +1,20 @@
+{
+  "format": "kelasi-depenses",
+  "version": 1,
+  "devise": "EUR",
+  "comptes": [
+    { "nom": "Espèces", "type": "Espèces", "solde_initial": 0 },
+    { "nom": "Banque Postale", "type": "Banque", "solde_initial": 1500.00 },
+    { "nom": "Max Card", "type": "Carte de crédit", "solde_initial": 0 }
+  ],
+  "operations": [
+    { "date": "2025-07-01", "heure": "08:15", "type": "revenu",   "montant": 2400.00, "categorie": "Salaire",        "compte": "Banque Postale", "note": "Salaire juillet" },
+    { "date": "2025-07-16", "heure": "13:00", "type": "depense",  "montant": 1750.00, "categorie": "Loyer",          "compte": "Banque Postale", "note": "Loyer juillet" },
+    { "date": "2025-07-18", "heure": "13:00", "type": "depense",  "montant": 704.95,  "categorie": "Alimentation / Repas", "compte": "Max Card", "note": "" },
+    { "date": "2025-07-18", "heure": "13:00", "type": "depense",  "montant": 528.75,  "categorie": "Vêtements",      "compte": "Espèces",        "note": "" },
+    { "date": "2025-07-19", "heure": "13:00", "type": "depense",  "montant": 50.15,   "categorie": "Factures", "sous_categorie": "Électricité", "compte": "Espèces", "note": "Facture Enerlec" },
+    { "date": "2025-07-20", "heure": "10:30", "type": "virement", "montant": 200.00,  "compte": "Banque Postale", "vers_compte": "Espèces", "note": "Retrait DAB" },
+    { "date": "2025-07-22",                   "type": "depense",  "montant": 300.00,  "categorie": "Prêt à X",       "compte": "Espèces",        "note": "Prêt à Jean, remboursement prévu en septembre" },
+    { "date": "2025-07-25", "heure": "17:45", "type": "revenu",   "montant": 85.00,   "categorie": "Vente",          "compte": "Espèces",        "note": "Vente vélo" }
+  ]
+}

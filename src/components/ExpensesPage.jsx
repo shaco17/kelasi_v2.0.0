@@ -1,6 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, Wallet, ArrowLeftRight, CalendarClock, ChevronLeft, ChevronRight, Search, X, ArrowDownLeft, Pencil, ShoppingCart, House, Car, HeartPulse, Ticket, Zap, UtensilsCrossed, Tag, CircleMinus, CirclePlus } from 'lucide-react';
-import { aggregateByCategory, budgetProgress, calculateAccountBalances, groupTransactionsByDay, monthlyTotals, shiftMonth, totalAccountBalance, upcomingPayments } from '../lib/depenses.js';
+import { aggregateByCategory, budgetProgress, calculateAccountBalances, categoriesForType, groupTransactionsByDay, monthlyTotals, orderedCategories, shiftMonth, totalAccountBalance, upcomingPayments } from '../lib/depenses.js';
+import { CATEGORY_ICON_SET, categoryIcon } from '../lib/category-icons.js';
+import { prepareExpenseImport } from '../lib/import-depenses.js';
+import { Upload, Download } from 'lucide-react';
 import { aggregatePieCategories, buildMonthlySeries } from '../lib/expense-charts.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -18,7 +21,7 @@ const CATEGORY_ICONS = { courses: ShoppingCart, loyer: House, transport: Car, sa
 function CatIcon({ category, type, size = 22 }) {
   if (type === 'transfer') return <ArrowLeftRight size={size} strokeWidth={1.8}/>;
   if (type === 'income' && !category) return <ArrowDownLeft size={size} strokeWidth={1.8}/>;
-  const Icon = CATEGORY_ICONS[category?.id];
+  const Icon = categoryIcon(category) || CATEGORY_ICONS[category?.id];
   if (Icon) return <Icon size={size} strokeWidth={1.8}/>;
   return category?.icon && category.icon !== '•' ? <span className="xp-glyph">{category.icon}</span> : <Tag size={size} strokeWidth={1.8}/>;
 }
@@ -30,7 +33,7 @@ const FILTERS = [['all', 'Tout'], ['expense', 'Dépenses'], ['income', 'Revenus'
 const TABS = [['journal', 'Journal'], ['analyse', 'Analyse'], ['budgets', 'Budgets'], ['recurrences', 'Récurrences'], ['comptes', 'Comptes']];
 const TAB_ALIASES = { transactions: 'journal', overview: 'journal' };
 const ACCOUNT_TYPES = ['Espèces', 'Banque', 'Carte de crédit', 'Épargne', 'Mobile money'];
-const newTransaction = (data, type = 'expense') => ({ date: today(), type, amount: '', accountId: data.accounts[0]?.id || '', destinationAccountId: '', categoryId: type === 'expense' ? data.categories[0]?.id || '' : '', note: '', receipt: '' });
+const newTransaction = (data, type = 'expense') => ({ date: today(), type, amount: '', accountId: data.accounts[0]?.id || '', destinationAccountId: '', categoryId: type === 'expense' ? (data.categories.find(c => c.id === 'courses')?.id || '') : type === 'income' ? (data.categories.find(c => c.id === 'salaire')?.id || '') : '', note: '', receipt: '' });
 
 async function compressImage(file) {
   return new Promise((resolve, reject) => {
@@ -45,13 +48,17 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
   const [month, setMonth] = useState(today().slice(0, 7));
   const [tab, setTab] = useState(TAB_ALIASES[initialTab] || initialTab);
   const [filter, setFilter] = useState('all');
+  const tabsRef = useRef(null);
+  useEffect(() => { tabsRef.current?.querySelector('.active')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }, [tab]);
   const [search, setSearch] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [form, setForm] = useState(null);
   const [accountForm, setAccountForm] = useState(null);
   const [budgetForm, setBudgetForm] = useState(null);
   const [recurrenceForm, setRecurrenceForm] = useState(null);
-  const cats = data.categories.filter(c => !c.deleted);
+  const cats = orderedCategories(data.categories);
+  const [categoryForm, setCategoryForm] = useState(null);
+  const [importState, setImportState] = useState(null);
   const catById = id => data.categories.find(c => c.id === id);
   const accById = id => data.accounts.find(a => a.id === id);
 
@@ -99,8 +106,33 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
     patch(d => ({ ...d, recurrences: r.id ? d.recurrences.map(x => x.id === r.id ? { ...x, ...r, updated_at: now } : x) : [...d.recurrences, { ...r, id: uid(), active: true, created_at: now, updated_at: now }] }));
     setRecurrenceForm(null);
   }
-  function addCategory() { const name = prompt('Nom de la nouvelle catégorie'); if (!name?.trim()) return; patch(d => ({ ...d, categories: [...d.categories, { id: uid(), name: name.trim(), color: '#5da98a', icon: name.trim().charAt(0).toUpperCase(), updated_at: new Date().toISOString() }] })); }
-  function renameCategory(c) { const name = prompt('Nom de la catégorie', c.name); if (!name?.trim()) return; patch(d => ({ ...d, categories: d.categories.map(x => x.id === c.id ? { ...x, name: name.trim(), updated_at: new Date().toISOString() } : x) })); }
+  function addCategory() { setCategoryForm({ name: '', kind: 'expense', parentId: '', color: '#5da98a', iconKey: 'tag' }); }
+  function renameCategory(c) { setCategoryForm({ ...c, parentId: c.parentId || '', kind: c.kind || 'both', iconKey: c.iconKey || 'tag' }); }
+  function saveCategory(c) {
+    const now = new Date().toISOString(), row = { ...c, name: c.name.trim(), parentId: c.parentId || null, updated_at: now };
+    patch(d => ({ ...d, categories: c.id ? d.categories.map(x => x.id === c.id ? { ...x, ...row } : x) : [...d.categories, { ...row, id: uid(), icon: '', deleted: false, created_at: now }] }));
+    setCategoryForm(null);
+  }
+  function removeCategory(c) {
+    const used = data.transactions.filter(t => t.categoryId === c.id).length, children = data.categories.filter(x => x.parentId === c.id).length;
+    if (!confirm(`Supprimer la catégorie « ${c.name} » ?${used ? `\n${used} opération(s) passeront « Sans catégorie ».` : ''}${children ? `\nSes ${children} sous-catégorie(s) deviendront principales.` : ''}`)) return;
+    patch(d => ({ ...d, categories: d.categories.filter(x => x.id !== c.id).map(x => x.parentId === c.id ? { ...x, parentId: null, updated_at: new Date().toISOString() } : x), budgets: d.budgets.filter(b => b.categoryId !== c.id), deletedDepenseIds: [...new Set([...d.deletedDepenseIds, `categories:${c.id}`])] }));
+    setCategoryForm(null);
+  }
+  async function readImportFile(file) {
+    try {
+      if (file.size > 15 * 1024 * 1024) throw new Error('Fichier trop volumineux (15 Mo maximum).');
+      const json = JSON.parse(await file.text());
+      const { report } = prepareExpenseImport(data, json);
+      setImportState({ name: file.name, json, report });
+    } catch (err) { setImportState({ name: file.name, error: err instanceof SyntaxError ? 'Ce fichier n\'est pas un JSON valide.' : err.message }); }
+  }
+  function confirmImport() {
+    const { json, report } = importState;
+    patch(d => { const prepared = prepareExpenseImport(d, json); return { ...d, ...prepared.data }; });
+    if (report.to) setMonth(report.to.slice(0, 7));
+    setImportState(null); setTab('journal');
+  }
 
   const net = totals.income - totals.expenses;
   return <div className="xp">
@@ -115,7 +147,7 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
       </div>
     </div>
 
-    <nav className="xp-tabs" aria-label="Sections des dépenses">{TABS.map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</nav>
+    <nav className="xp-tabs" ref={tabsRef} aria-label="Sections des dépenses">{TABS.map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</nav>
 
     {tab === 'journal' && <section className="xp-journal">
       <div className="xp-filters">
@@ -124,7 +156,7 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
       </div>
       <p className="xp-hint">Touche une opération pour la modifier ou la supprimer.</p>
       {showSearch && <input className="xp-search" autoFocus placeholder="Rechercher une note ou un montant" value={search} onChange={e => setSearch(e.target.value)}/>}
-      {days.length === 0 && <div className="xp-empty"><Wallet size={28}/><strong>Aucune opération en {monthLabel(month)}</strong><span>Appuie sur + pour noter une dépense.</span></div>}
+      {days.length === 0 && <div className="xp-empty"><Wallet size={28}/><strong>Aucune opération en {monthLabel(month)}</strong><span>Ajoute une dépense, ou importe tes anciennes opérations.</span><button className="btn-secondary" onClick={() => setTab('comptes')}><Upload size={15}/> Importer (JSON)</button></div>}
       {days.length > 0 && <div className="xp-timeline">{days.map(day => <div className="xp-day" key={day.date}>
         <div className="xp-day-head"><span className="xp-col-amount">{shortDay(day.date)}</span><span className="xp-col-line"/><span className="xp-day-name">{dayLabel(day.date).startsWith('Aujourd') || dayLabel(day.date) === 'Hier' ? dayLabel(day.date) : weekday(day.date)}</span></div>
         <ul>{day.items.map(t => { const c = catById(t.categoryId), isTransfer = t.type === 'transfer'; return <li key={t.id}><button className="xp-row" aria-label={`Modifier ou supprimer : ${t.type === 'income' ? 'revenu' : t.type === 'transfer' ? 'virement' : 'dépense'} de ${money(t.amount)} du ${t.date}`} onClick={() => setForm({ ...t, amount: String(t.amount) })}>
@@ -154,8 +186,13 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
       <div className="xp-panel-head"><h2>Comptes · {money(totalAccountBalance(data.accounts, data.transactions))}</h2><button className="btn-secondary" onClick={() => setAccountForm({ name: '', type: 'Espèces', initialBalance: '0' })}><Plus size={15}/> Compte</button></div>
       <ul className="xp-list">{data.accounts.map(a => <li key={a.id}><button className="xp-row" onClick={() => setAccountForm({ ...a, initialBalance: String(a.initialBalance ?? 0) })}><span className="xp-icon" style={{ background: 'var(--green-soft)', color: 'var(--green)' }}><Wallet size={17}/></span><span className="xp-main"><strong>{a.name}</strong><small>{a.type}</small></span><span className={`xp-amount ${(balances[a.id] || 0) < 0 ? 'neg' : ''}`}>{money(balances[a.id] || 0)}</span></button></li>)}</ul>
       {data.accounts.length === 0 && <p className="xp-muted">Ajoute un premier compte (espèces, banque…) pour noter tes opérations.</p>}
+      <div className="xp-import">
+        <div><strong>Importer d'anciennes opérations</strong><small>Fichier JSON avec dates, heures, catégories et notes. Un aperçu s'affiche avant l'enregistrement.</small></div>
+        <label className="btn-primary"><Upload size={15}/> Importer un fichier JSON<input type="file" accept="application/json,.json" hidden onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; if (f) readImportFile(f); }}/></label>
+        <a className="btn-secondary" href="/modele-import-depenses.json" download="modele-import-depenses.json"><Download size={15}/> Télécharger le modèle</a>
+      </div>
       <div className="xp-panel-head xp-sub"><h2>Catégories</h2><button className="btn-secondary" onClick={addCategory}><Plus size={15}/> Catégorie</button></div>
-      <div className="xp-cat-list">{cats.map(c => <button key={c.id} onClick={() => renameCategory(c)}><span className="xp-icon sm" style={{ background: `${c.color}22`, color: c.color }}><CatIcon category={c} size={15}/></span>{c.name}<Pencil size={12}/></button>)}</div>
+      <div className="xp-cat-list">{cats.map(c => <button key={c.id} className={c.parentId ? 'child' : ''} onClick={() => renameCategory(c)}><span className="xp-icon sm" style={{ background: `${c.color}22`, color: c.color }}><CatIcon category={c} size={15}/></span>{c.name}<Pencil size={12}/></button>)}</div>
     </section>}
 
     {tab !== 'comptes' && data.accounts.length > 0 && <div className="xp-accounts-strip">{data.accounts.map(a => <span key={a.id}>{a.name} <b>{money(balances[a.id] || 0)}</b></span>)}</div>}
@@ -165,6 +202,36 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
       <button className="xp-act expense" onClick={() => data.accounts.length ? setForm(newTransaction(data)) : setAccountForm({ name: 'Espèces', type: 'Espèces', initialBalance: '0' })}><CircleMinus size={24} strokeWidth={1.7}/><span>Dépense</span></button>
     </div>
 
+    {categoryForm && <Sheet title={categoryForm.id ? 'Modifier la catégorie' : 'Nouvelle catégorie'} onClose={() => setCategoryForm(null)}>
+      <form className="xp-form" onSubmit={e => { e.preventDefault(); if (categoryForm.name.trim()) saveCategory(categoryForm); }}>
+        <label>Nom<input autoFocus required value={categoryForm.name} onChange={e => setCategoryForm({ ...categoryForm, name: e.target.value })}/></label>
+        <div className="xp-form-row">
+          <label>Utilisée pour<select value={categoryForm.kind} onChange={e => setCategoryForm({ ...categoryForm, kind: e.target.value })}><option value="expense">Dépenses</option><option value="income">Revenus</option><option value="both">Les deux</option></select></label>
+          <label>Catégorie parente<select value={categoryForm.parentId} onChange={e => setCategoryForm({ ...categoryForm, parentId: e.target.value })}><option value="">Aucune (principale)</option>{cats.filter(c => !c.parentId && c.id !== categoryForm.id).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+        </div>
+        <label>Couleur<input type="color" value={categoryForm.color || '#5da98a'} onChange={e => setCategoryForm({ ...categoryForm, color: e.target.value })}/></label>
+        <div className="xp-icon-picker" role="radiogroup" aria-label="Icône">{Object.entries(CATEGORY_ICON_SET).map(([key, Icon]) => <button type="button" role="radio" aria-checked={categoryForm.iconKey === key} aria-label={key} key={key} className={categoryForm.iconKey === key ? 'active' : ''} style={categoryForm.iconKey === key ? { color: categoryForm.color, borderColor: categoryForm.color } : null} onClick={() => setCategoryForm({ ...categoryForm, iconKey: key })}><Icon size={19}/></button>)}</div>
+        <div className="xp-form-actions">{categoryForm.id && <button type="button" className="btn-danger-outline" onClick={() => removeCategory(categoryForm)}><Trash2 size={15}/> Supprimer</button>}<button className="btn-primary">Enregistrer</button></div>
+      </form>
+    </Sheet>}
+    {importState && <Sheet title="Importer des opérations" onClose={() => setImportState(null)}>
+      <div className="xp-form">
+        <p className="xp-muted">Fichier : <b>{importState.name}</b></p>
+        {importState.error ? <p className="inline-error">{importState.error}</p> : <>
+          <ul className="xp-import-report">
+            <li><span>Opérations à ajouter</span><b>{importState.report.added}</b></li>
+            {importState.report.from && <li><span>Période</span><b>{new Date(`${importState.report.from}T12:00:00`).toLocaleDateString('fr-FR')} → {new Date(`${importState.report.to}T12:00:00`).toLocaleDateString('fr-FR')}</b></li>}
+            <li><span>Revenus</span><b className="pos">+{money(importState.report.income)}</b></li>
+            <li><span>Dépenses</span><b className="neg">−{money(importState.report.expense)}</b></li>
+            {importState.report.duplicates > 0 && <li><span>Déjà présentes (ignorées)</span><b>{importState.report.duplicates}</b></li>}
+            {importState.report.newAccounts.length > 0 && <li><span>Nouveaux comptes</span><b>{importState.report.newAccounts.join(', ')}</b></li>}
+            {importState.report.newCategories.length > 0 && <li><span>Nouvelles catégories</span><b>{importState.report.newCategories.join(', ')}</b></li>}
+          </ul>
+          {importState.report.errors.length > 0 && <details className="xp-import-errors" open={importState.report.added === 0}><summary>{importState.report.errors.length} ligne(s) refusée(s)</summary><ul>{importState.report.errors.slice(0, 50).map(e => <li key={e.line}>Opération n° {e.line} : {e.message}</li>)}</ul></details>}
+        </>}
+        <div className="xp-form-actions"><button type="button" className="btn-secondary" onClick={() => setImportState(null)}>Annuler</button>{!importState.error && <button type="button" className="btn-primary" disabled={!importState.report.added} onClick={confirmImport}>Importer {importState.report.added} opération(s)</button>}</div>
+      </div>
+    </Sheet>}
     {form && <TransactionModal form={form} setForm={setForm} data={data} cats={cats} onSave={saveTransaction} onDelete={removeTransaction}/>}
     {accountForm && <Sheet title={accountForm.id ? 'Modifier le compte' : 'Nouveau compte'} onClose={() => setAccountForm(null)}>
       <form className="xp-form" onSubmit={e => { e.preventDefault(); if (accountForm.name.trim()) saveAccount({ ...accountForm, name: accountForm.name.trim(), initialBalance: Number(String(accountForm.initialBalance).replace(',', '.')) || 0 }); }}>
@@ -224,9 +291,9 @@ function TransactionModal({ form, setForm, data, cats, onSave, onDelete }) {
   const valid = amount > 0 && form.accountId && form.date && (form.type !== 'transfer' || (form.destinationAccountId && form.destinationAccountId !== form.accountId));
   return <Sheet title={form.id ? "Modifier l'opération" : 'Nouvelle opération'} onClose={() => setForm(null)}>
     <form className="xp-form" onSubmit={e => { e.preventDefault(); if (valid) onSave(form); }}>
-      <div className="xp-type">{TYPES.map(([id, label]) => <button type="button" key={id} className={`${form.type === id ? 'active' : ''} t-${id}`} onClick={() => set({ type: id, categoryId: id === 'expense' ? form.categoryId || cats[0]?.id || '' : id === 'income' ? form.categoryId : '' })}>{label}</button>)}</div>
+      <div className="xp-type">{TYPES.map(([id, label]) => <button type="button" key={id} className={`${form.type === id ? 'active' : ''} t-${id}`} onClick={() => { const allowed = categoriesForType(cats, id); set({ type: id, categoryId: id === 'transfer' ? '' : allowed.some(c => c.id === form.categoryId) ? form.categoryId : (id === 'expense' ? allowed[0]?.id || '' : '') }); }}>{label}</button>)}</div>
       <label className={`xp-amount-input t-${form.type}`}><span>€</span><input autoFocus required inputMode="decimal" placeholder="0,00" value={form.amount} onChange={e => set({ amount: e.target.value.replace(/[^\d.,]/g, '') })} aria-label="Montant en euros"/></label>
-      {form.type !== 'transfer' && <div className="xp-cat-grid" role="radiogroup" aria-label="Catégorie">{cats.map(c => <button type="button" role="radio" aria-checked={form.categoryId === c.id} key={c.id} className={form.categoryId === c.id ? 'active' : ''} onClick={() => set({ categoryId: form.categoryId === c.id ? '' : c.id })}><span className="xp-icon" style={{ background: `${c.color}22`, color: c.color }}><CatIcon category={c} size={19}/></span><small>{c.name}</small></button>)}</div>}
+      {form.type !== 'transfer' && <div className="xp-cat-grid" role="radiogroup" aria-label="Catégorie">{categoriesForType(cats, form.type).map(c => <button type="button" role="radio" aria-checked={form.categoryId === c.id} key={c.id} className={form.categoryId === c.id ? 'active' : ''} onClick={() => set({ categoryId: form.categoryId === c.id ? '' : c.id })}><span className="xp-icon" style={{ background: `${c.color}22`, color: c.color }}><CatIcon category={c} size={19}/></span><small>{c.name}</small>{c.parentId && <em>{cats.find(p => p.id === c.parentId)?.name}</em>}</button>)}</div>}
       <div className="xp-form-row">
         <label>{form.type === 'transfer' ? 'De' : 'Compte'}<select required value={form.accountId} onChange={e => set({ accountId: e.target.value })}><option value="">Choisir</option>{data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
         {form.type === 'transfer' ? <label>Vers<select required value={form.destinationAccountId || ''} onChange={e => set({ destinationAccountId: e.target.value })}><option value="">Choisir</option>{data.accounts.filter(a => a.id !== form.accountId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
