@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, Wallet, ArrowLeftRight, CalendarClock, ChevronLeft, ChevronRight, Search, X, ArrowDownLeft, Pencil, ShoppingCart, House, Car, HeartPulse, Ticket, Zap, UtensilsCrossed, Tag, CircleMinus, CirclePlus } from 'lucide-react';
-import { aggregateByCategory, budgetProgress, calculateAccountBalances, categoriesForType, groupTransactionsByDay, monthlyTotals, orderedCategories, shiftMonth, totalAccountBalance, upcomingPayments } from '../lib/depenses.js';
+import { aggregateByCategory, budgetProgress, calculateAccountBalances, categoriesForType, categoryBreakdown, monthlyStatement, groupTransactionsByDay, monthlyTotals, orderedCategories, shiftMonth, totalAccountBalance, upcomingPayments } from '../lib/depenses.js';
 import { CATEGORY_ICON_SET, categoryIcon } from '../lib/category-icons.js';
 import { prepareExpenseImport } from '../lib/import-depenses.js';
 import { Upload, Download } from 'lucide-react';
@@ -28,6 +28,7 @@ function CatIcon({ category, type, size = 22 }) {
 const shortDay = date => new Date(`${date}T12:00:00`).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }).replace('.', '').toUpperCase();
 const weekday = date => { const s = new Date(`${date}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long' }); return s.charAt(0).toUpperCase() + s.slice(1); };
 const timeOf = t => { const c = String(t.created_at || ''); return c.length > 16 && !c.includes('T00:00:00') ? new Date(c).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : ''; };
+const inPeriodLocal = (date, period) => !period || String(date || '').startsWith(period);
 const TYPES = [['expense', 'Dépense'], ['income', 'Revenu'], ['transfer', 'Virement']];
 const FILTERS = [['all', 'Tout'], ['expense', 'Dépenses'], ['income', 'Revenus'], ['transfer', 'Virements']];
 const TABS = [['journal', 'Journal'], ['analyse', 'Analyse'], ['budgets', 'Budgets'], ['recurrences', 'Récurrences'], ['comptes', 'Comptes']];
@@ -46,6 +47,12 @@ async function compressImage(file) {
 export default function ExpensesPage({ value, onChange, initialTab = 'journal' }) {
   const data = value, patch = fn => onChange(current => fn(current));
   const [month, setMonth] = useState(today().slice(0, 7));
+  const [mode, setMode] = useState('month'); // 'month' | 'year' | 'all'
+  const period = mode === 'month' ? month : mode === 'year' ? month.slice(0, 4) : '';
+  const periodLabel = mode === 'month' ? monthLabel(month) : mode === 'year' ? `Année ${month.slice(0, 4)}` : "Tout l'historique";
+  const [catFilter, setCatFilter] = useState(null);
+  const [breakdown, setBreakdown] = useState(null); // 'expense' | 'income'
+  const shiftPeriod = delta => setMonth(m => mode === 'year' ? shiftMonth(m, 12 * delta) : shiftMonth(m, delta));
   const [tab, setTab] = useState(TAB_ALIASES[initialTab] || initialTab);
   const [filter, setFilter] = useState('all');
   const tabsRef = useRef(null);
@@ -62,8 +69,8 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
   const catById = id => data.categories.find(c => c.id === id);
   const accById = id => data.accounts.find(a => a.id === id);
 
-  const totals = monthlyTotals(data.transactions, month);
-  const days = useMemo(() => groupTransactionsByDay(data.transactions, month, { type: filter, search }), [data.transactions, month, filter, search]);
+  const totals = monthlyTotals(data.transactions, period);
+  const days = useMemo(() => groupTransactionsByDay(data.transactions, period, { type: filter, search, categoryIds: catFilter?.ids || null }), [data.transactions, period, filter, search, catFilter]);
   const balances = calculateAccountBalances(data.accounts, data.transactions);
   const budgets = budgetProgress(data.budgets, data.transactions, month);
   const upcoming = upcomingPayments(data.recurrences, today()).slice(0, 5);
@@ -73,7 +80,7 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
     const old = data.transactions.find(x => x.id === t.id);
     const row = { ...t, amount: Math.abs(Number(String(t.amount).replace(',', '.'))), categoryId: t.type === 'transfer' ? null : t.categoryId || null, destinationAccountId: t.type === 'transfer' ? t.destinationAccountId : null, updated_at: now, created_at: old?.created_at || now };
     patch(d => ({ ...d, transactions: old ? d.transactions.map(x => x.id === row.id ? row : x) : [{ ...row, id: uid() }, ...d.transactions] }));
-    if (row.date.slice(0, 7) !== month) setMonth(row.date.slice(0, 7));
+    if (!inPeriodLocal(row.date, period)) { setMode('month'); setMonth(row.date.slice(0, 7)); }
     setForm(null);
   }
   function removeTransaction(t) {
@@ -137,15 +144,16 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
   const net = totals.income - totals.expenses;
   return <div className="xp">
     <h1 className="sr-only">Dépenses</h1>
-    <MonthDonut data={data} month={month} cats={cats} totals={totals}/>
+    <MonthDonut data={data} period={period} label={mode === 'month' ? new Date(`${month}-01T12:00:00`).toLocaleDateString('fr-FR', { month: 'long' }) : mode === 'year' ? month.slice(0, 4) : 'Total'} cats={cats} totals={totals} onOpen={() => setBreakdown('expense')}/>
     <div className="xp-bar">
       <div className="xp-bar-balance"><strong className={net < 0 ? 'neg' : ''}>{money(net)}</strong><small><span className="pos-light">+{money(totals.income)}</span> · <span className="neg-light">−{money(totals.expenses)}</span></small></div>
       <div className="xp-bar-month">
-        <button aria-label="Mois précédent" onClick={() => setMonth(m => shiftMonth(m, -1))}><ChevronLeft size={20}/></button>
-        <label><span>{monthLabel(month)}</span><input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)} aria-label="Choisir le mois"/></label>
-        <button aria-label="Mois suivant" onClick={() => setMonth(m => shiftMonth(m, 1))}><ChevronRight size={20}/></button>
+        {mode !== 'all' && <button aria-label={mode === 'year' ? 'Année précédente' : 'Mois précédent'} onClick={() => shiftPeriod(-1)}><ChevronLeft size={20}/></button>}
+        {mode === 'month' ? <label><span>{monthLabel(month)}</span><input type="month" value={month} onChange={e => e.target.value && setMonth(e.target.value)} aria-label="Choisir le mois"/></label> : <span className="xp-bar-label">{periodLabel}</span>}
+        {mode !== 'all' && <button aria-label={mode === 'year' ? 'Année suivante' : 'Mois suivant'} onClick={() => shiftPeriod(1)}><ChevronRight size={20}/></button>}
       </div>
     </div>
+    <div className="xp-period" role="tablist" aria-label="Période affichée">{[['month', 'Mois'], ['year', 'Année'], ['all', 'Tout']].map(([id, label]) => <button key={id} role="tab" aria-selected={mode === id} className={mode === id ? 'active' : ''} onClick={() => setMode(id)}>{label}</button>)}</div>
 
     <nav className="xp-tabs" ref={tabsRef} aria-label="Sections des dépenses">{TABS.map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}</nav>
 
@@ -154,9 +162,10 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
         <div className="xp-chips">{FILTERS.map(([id, label]) => <button key={id} className={filter === id ? 'active' : ''} onClick={() => setFilter(id)}>{label}</button>)}</div>
         <button className="icon-button" aria-label="Rechercher" onClick={() => { setShowSearch(s => !s); setSearch(''); }}>{showSearch ? <X size={18}/> : <Search size={18}/>}</button>
       </div>
+      {catFilter && <div className="xp-cat-chip"><span>Catégorie : <b>{catFilter.name}</b></span><button aria-label="Retirer le filtre de catégorie" onClick={() => { setCatFilter(null); setFilter('all'); }}><X size={15}/></button></div>}
       <p className="xp-hint">Touche une opération pour la modifier ou la supprimer.</p>
       {showSearch && <input className="xp-search" autoFocus placeholder="Rechercher une note ou un montant" value={search} onChange={e => setSearch(e.target.value)}/>}
-      {days.length === 0 && <div className="xp-empty"><Wallet size={28}/><strong>Aucune opération en {monthLabel(month)}</strong><span>Ajoute une dépense, ou importe tes anciennes opérations.</span><button className="btn-secondary" onClick={() => setTab('comptes')}><Upload size={15}/> Importer (JSON)</button></div>}
+      {days.length === 0 && <div className="xp-empty"><Wallet size={28}/><strong>Aucune opération{mode === 'all' ? '' : ` — ${periodLabel}`}{catFilter ? ` (${catFilter.name})` : ''}</strong><span>Ajoute une dépense, ou importe tes anciennes opérations.</span><button className="btn-secondary" onClick={() => setTab('comptes')}><Upload size={15}/> Importer (JSON)</button></div>}
       {days.length > 0 && <div className="xp-timeline">{days.map(day => <div className="xp-day" key={day.date}>
         <div className="xp-day-head"><span className="xp-col-amount">{shortDay(day.date)}</span><span className="xp-col-line"/><span className="xp-day-name">{dayLabel(day.date).startsWith('Aujourd') || dayLabel(day.date) === 'Hier' ? dayLabel(day.date) : weekday(day.date)}</span></div>
         <ul>{day.items.map(t => { const c = catById(t.categoryId), isTransfer = t.type === 'transfer'; return <li key={t.id}><button className="xp-row" aria-label={`Modifier ou supprimer : ${t.type === 'income' ? 'revenu' : t.type === 'transfer' ? 'virement' : 'dépense'} de ${money(t.amount)} du ${t.date}`} onClick={() => setForm({ ...t, amount: String(t.amount) })}>
@@ -167,7 +176,7 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
       </div>)}</div>}
     </section>}
 
-    {tab === 'analyse' && <Analyse data={data} month={month} cats={cats} budgets={budgets} upcoming={upcoming} onBudgets={() => setTab('budgets')}/>}
+    {tab === 'analyse' && <Analyse data={data} period={period} periodLabel={periodLabel} cats={cats} budgets={budgets} upcoming={upcoming} onBudgets={() => setTab('budgets')} onOpenBreakdown={type => setBreakdown(type)} onPickMonth={m => { setMode('month'); setMonth(m); setTab('journal'); }}/>}
 
     {tab === 'budgets' && <section className="panel xp-panel">
       <div className="xp-panel-head"><h2>Budgets · {monthLabel(month)}</h2><button className="btn-secondary" onClick={() => setBudgetForm({ categoryId: cats[0]?.id || '', limit: '' })}><Plus size={15}/> Budget</button></div>
@@ -202,6 +211,7 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
       <button className="xp-act expense" onClick={() => data.accounts.length ? setForm(newTransaction(data)) : setAccountForm({ name: 'Espèces', type: 'Espèces', initialBalance: '0' })}><CircleMinus size={24} strokeWidth={1.7}/><span>Dépense</span></button>
     </div>
 
+    {breakdown && <BreakdownSheet data={data} period={period} periodLabel={periodLabel} type={breakdown} setType={setBreakdown} onClose={() => setBreakdown(null)} onPick={row => { const ids = [row.id, ...data.categories.filter(c => c.parentId === row.id).map(c => c.id)]; setCatFilter({ name: row.name, ids }); setFilter(breakdown); setBreakdown(null); setTab('journal'); }}/>}
     {categoryForm && <Sheet title={categoryForm.id ? 'Modifier la catégorie' : 'Nouvelle catégorie'} onClose={() => setCategoryForm(null)}>
       <form className="xp-form" onSubmit={e => { e.preventDefault(); if (categoryForm.name.trim()) saveCategory(categoryForm); }}>
         <label>Nom<input autoFocus required value={categoryForm.name} onChange={e => setCategoryForm({ ...categoryForm, name: e.target.value })}/></label>
@@ -264,21 +274,43 @@ export default function ExpensesPage({ value, onChange, initialTab = 'journal' }
   </div>;
 }
 
-function MonthDonut({ data, month, cats, totals }) {
-  const pie = aggregatePieCategories(aggregateByCategory(data.transactions, month), cats, { maxCategories: 6, smallSlicePercent: 4 });
+function MonthDonut({ data, period, label, cats, totals, onOpen }) {
+  const pie = aggregatePieCategories(aggregateByCategory(data.transactions, period), cats, { maxCategories: 6, smallSlicePercent: 4 });
   const unspent = Math.max(0, totals.income - totals.expenses);
   const rows = [...pie.rows.map(r => ({ ...r })), ...(unspent > 0 ? [{ id: 'unspent', name: 'Non dépensé', color: 'var(--donut-rest)', amount: unspent }] : [])];
   const total = rows.reduce((s, r) => s + r.amount, 0);
   const C = 2 * Math.PI * 62; let offset = 0;
-  return <section className="xp-donut-card" aria-label="Répartition du mois">
-    <svg viewBox="0 0 180 180" className="xp-donut" role="img" aria-label={`Dépenses de ${monthLabel(month)}`}>
-      <circle cx="90" cy="90" r="62" fill="none" stroke="var(--border)" strokeWidth="30"/>
-      {total > 0 && rows.map(r => { const dash = r.amount / total * C, el = <circle key={r.id} cx="90" cy="90" r="62" fill="none" stroke={r.color} strokeWidth="30" strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-offset} transform="rotate(-90 90 90)"/>; offset += dash; return el; })}
-      <text x="90" y="84" textAnchor="middle" className="xp-donut-k">{new Date(`${month}-01T12:00:00`).toLocaleDateString('fr-FR', { month: 'long' }).toUpperCase()}</text>
-      <text x="90" y="104" textAnchor="middle" className="xp-donut-v">{money(totals.expenses)}</text>
-    </svg>
-    <ul className="xp-donut-legend">{rows.length ? rows.map(r => <li key={r.id}><i style={{ background: r.color }}/><span>{r.name}</span><b>{Math.round(r.amount / total * 100)} %</b></li>) : <li className="xp-muted">Aucune opération ce mois-ci</li>}</ul>
+  return <section className="xp-donut-card" aria-label="Répartition de la période">
+    <button type="button" className="xp-donut-btn" onClick={onOpen} aria-label="Voir le détail des dépenses par catégorie" disabled={!pie.total}>
+      <svg viewBox="0 0 180 180" className="xp-donut" role="img" aria-hidden="true">
+        <circle cx="90" cy="90" r="62" fill="none" stroke="var(--border)" strokeWidth="30"/>
+        {total > 0 && rows.map(r => { const dash = r.amount / total * C, el = <circle key={r.id} cx="90" cy="90" r="62" fill="none" stroke={r.color} strokeWidth="30" strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-offset} transform="rotate(-90 90 90)"/>; offset += dash; return el; })}
+        <text x="90" y="84" textAnchor="middle" className="xp-donut-k">{String(label).toUpperCase()}</text>
+        <text x="90" y="104" textAnchor="middle" className="xp-donut-v">{money(totals.expenses)}</text>
+      </svg>
+      {pie.total > 0 && <span className="xp-donut-hint">Détails</span>}
+    </button>
+    <ul className="xp-donut-legend">{rows.length ? rows.map(r => <li key={r.id}><i style={{ background: r.color }}/><span>{r.name}</span><b>{Math.round(r.amount / total * 100)} %</b></li>) : <li className="xp-muted">Aucune opération sur cette période</li>}</ul>
   </section>;
+}
+
+function BreakdownSheet({ data, period, periodLabel, type, setType, onClose, onPick }) {
+  const { rows, total } = categoryBreakdown(data.transactions, data.categories, period, type, data.budgets);
+  const max = rows[0]?.amount || 1;
+  return <Sheet title={`${type === 'expense' ? 'Dépenses' : 'Revenus'} · ${periodLabel}`} onClose={onClose}>
+    <div className="xp-bd">
+      <div className="xp-type xp-bd-type">{[['expense', 'Dépenses'], ['income', 'Revenus']].map(([id, l]) => <button type="button" key={id} className={`${type === id ? 'active' : ''} t-${id}`} onClick={() => setType(id)}>{l}</button>)}</div>
+      <div className="xp-bd-total"><span>Total</span><strong className={type === 'expense' ? 'neg' : 'pos'}>{money(total)}</strong></div>
+      {rows.length === 0 && <p className="xp-muted">Aucune opération sur cette période.</p>}
+      <ul>{rows.map(r => { const [euros, cents] = money(r.amount).replace(/\s?€$/, '').split(','); return <li key={r.id}><button type="button" className="xp-bd-row" onClick={() => onPick(r)} aria-label={`${r.name} : ${money(r.amount)}, ${r.count} opération(s). Voir les opérations`}>
+        <span className="xp-bd-fill" style={{ width: `${Math.max(2, r.amount / max * 100)}%`, background: r.color }}/>
+        <span className="xp-bd-icon" style={{ background: r.color }}><CatIcon category={r.category} type={type} size={18}/></span>
+        <span className="xp-bd-name">{r.name}<sup>{r.count}</sup>{r.over && <span className="xp-bd-warn" title="Budget dépassé">⚠</span>}<small>{r.percent.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %</small></span>
+        <span className="xp-bd-amount"><b className={r.over ? 'neg' : ''}>{euros}<sup>,{cents || '00'}</sup></b>{r.limit !== null && <small>budget {money(r.limit)}</small>}</span>
+      </button></li>; })}</ul>
+      <p className="xp-muted">Touche une catégorie pour voir ses opérations dans le journal.</p>
+    </div>
+  </Sheet>;
 }
 
 function Sheet({ title, onClose, children }) {
@@ -308,22 +340,34 @@ function TransactionModal({ form, setForm, data, cats, onSave, onDelete }) {
   </Sheet>;
 }
 
-function Analyse({ data, month, cats, budgets, upcoming, onBudgets }) {
-  const pie = aggregatePieCategories(aggregateByCategory(data.transactions, month), cats);
-  const trend = buildMonthlySeries(data.transactions, month);
+function Analyse({ data, period, periodLabel, cats, budgets, upcoming, onBudgets, onOpenBreakdown, onPickMonth }) {
+  const pie = aggregatePieCategories(aggregateByCategory(data.transactions, period), cats);
+  const statement = monthlyStatement(data.transactions, period);
+  const maxBar = Math.max(1, ...statement.map(m => Math.max(m.income, m.expenses)));
+  const sum = statement.reduce((s, m) => ({ income: s.income + m.income, expenses: s.expenses + m.expenses }), { income: 0, expenses: 0 });
+  const shortMonth = m => new Date(`${m}-01T12:00:00`).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }).replace('.', '');
+  const barsRef = useRef(null);
+  useEffect(() => { const el = barsRef.current; if (el) el.scrollLeft = el.scrollWidth; }, [statement.length, period]);
   return <div className="xp-analyse">
     <section className="panel xp-panel">
-      <h2>Dépenses par catégorie</h2>
-      {pie.total > 0 ? <div className="expense-pie-layout"><svg className="expense-donut" viewBox="0 0 160 160" role="img" aria-label={`Répartition des dépenses pour ${month}`}><circle cx="80" cy="80" r="58" fill="none" stroke="var(--border)" strokeWidth="22"/>{(() => { let offset = 0; return pie.rows.map(row => { const dash = row.percent / 100 * 364.425, node = <circle key={row.id} cx="80" cy="80" r="58" fill="none" stroke={row.color} strokeWidth="22" strokeDasharray={`${dash} ${364.425 - dash}`} strokeDashoffset={-offset} transform="rotate(-90 80 80)"/>; offset += dash; return node; }); })()}<text x="80" y="76" textAnchor="middle" className="expense-donut-label">Total</text><text x="80" y="96" textAnchor="middle" className="expense-donut-total">{money(pie.total)}</text></svg>
-        <ul className="xp-legend">{pie.rows.map(row => <li key={row.id}><i style={{ background: row.color }}/><span>{row.name}</span><small>{row.percent.toFixed(0)} %</small><b>{money(row.amount)}</b></li>)}</ul></div>
-        : <p className="xp-muted">Aucune dépense ce mois-ci.</p>}
+      <div className="xp-panel-head"><h2>Dépenses par catégorie</h2>{pie.total > 0 && <button className="text-link" onClick={() => onOpenBreakdown('expense')}>Détails</button>}</div>
+      {pie.total > 0 ? <button type="button" className="xp-pie-btn" onClick={() => onOpenBreakdown('expense')} aria-label="Voir le détail par catégorie"><div className="expense-pie-layout"><svg className="expense-donut" viewBox="0 0 160 160" role="img" aria-hidden="true"><circle cx="80" cy="80" r="58" fill="none" stroke="var(--border)" strokeWidth="22"/>{(() => { let offset = 0; return pie.rows.map(row => { const dash = row.percent / 100 * 364.425, node = <circle key={row.id} cx="80" cy="80" r="58" fill="none" stroke={row.color} strokeWidth="22" strokeDasharray={`${dash} ${364.425 - dash}`} strokeDashoffset={-offset} transform="rotate(-90 80 80)"/>; offset += dash; return node; }); })()}<text x="80" y="76" textAnchor="middle" className="expense-donut-label">Total</text><text x="80" y="96" textAnchor="middle" className="expense-donut-total">{money(pie.total)}</text></svg>
+        <ul className="xp-legend">{pie.rows.map(row => <li key={row.id}><i style={{ background: row.color }}/><span>{row.name}</span><small>{row.percent.toFixed(0)} %</small><b>{money(row.amount)}</b></li>)}</ul></div></button>
+        : <p className="xp-muted">Aucune dépense sur cette période.</p>}
     </section>
-    <section className="panel xp-panel">
-      <h2>6 derniers mois</h2>
-      <svg className="expense-trend-svg" viewBox="0 0 420 170" role="img" aria-label="Revenus et dépenses sur six mois"><line x1="20" y1="135" x2="400" y2="135" stroke="var(--border)"/>{['expenses', 'income'].map((kind, j) => { const vals = trend[kind], y = n => 125 - (n / trend.max) * 105; return <g key={kind}><polyline fill="none" stroke={j ? '#4ca68a' : '#dc806d'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" points={vals.map((n, i) => `${20 + i * 76},${y(n)}`).join(' ')}/>{vals.map((n, i) => <circle key={i} cx={20 + i * 76} cy={y(n)} r="3.5" fill={j ? '#4ca68a' : '#dc806d'}/>)}</g>; })}{trend.months.map((key, i) => <text key={key} x={20 + i * 76} y="155" textAnchor="middle" className="expense-month-tick">{new Date(`${key}-01T12:00:00`).toLocaleDateString('fr-FR', { month: 'short' })}</text>)}</svg>
-      <div className="chart-legend"><span><i style={{ background: '#dc806d' }}/> Dépenses</span><span><i style={{ background: '#4ca68a' }}/> Revenus</span></div>
+    <section className="panel xp-panel xp-wide">
+      <div className="xp-panel-head"><h2>Évolution · {period && period.length === 7 ? '12 derniers mois' : periodLabel}</h2><span className="xp-legend-inline"><i className="inc"/> Revenus <i className="exp"/> Dépenses</span></div>
+      {statement.length ? <div className="xp-bars" ref={barsRef} role="img" aria-label="Revenus et dépenses par mois">{statement.map(m => <button type="button" key={m.month} className="xp-bar-col" onClick={() => onPickMonth(m.month)} title={`${monthLabel(m.month)} : +${money(m.income)} / −${money(m.expenses)}`}>
+        <span className="xp-bar-pair"><i className="inc" style={{ height: `${m.income / maxBar * 100}%` }}/><i className="exp" style={{ height: `${m.expenses / maxBar * 100}%` }}/></span><small>{shortMonth(m.month)}</small></button>)}</div> : <p className="xp-muted">Aucune opération.</p>}
     </section>
-    <section className="panel xp-panel"><div className="xp-panel-head"><h2>Budgets</h2><button className="text-link" onClick={onBudgets}>Gérer</button></div>{budgets.slice(0, 4).map(b => <BudgetRow key={b.id} b={b} category={data.categories.find(c => c.id === b.categoryId)}/>)}{!budgets.length && <p className="xp-muted">Aucun budget défini.</p>}</section>
+    <section className="panel xp-panel xp-wide">
+      <div className="xp-panel-head"><h2>Relevé mensuel</h2><span className="xp-muted">{statement.length} mois</span></div>
+      <div className="xp-statement-wrap"><table className="xp-statement"><thead><tr><th>Mois</th><th>Revenus</th><th>Dépenses</th><th>Solde</th><th>Cumul</th></tr></thead>
+        <tbody>{[...statement].reverse().map(m => <tr key={m.month} onClick={() => onPickMonth(m.month)} tabIndex={0} onKeyDown={e => e.key === 'Enter' && onPickMonth(m.month)}><td>{monthLabel(m.month)}</td><td className="pos">{money(m.income)}</td><td className="neg">{money(m.expenses)}</td><td className={m.net < 0 ? 'neg' : 'pos'}>{m.net > 0 ? '+' : ''}{money(m.net)}</td><td>{money(m.cumul)}</td></tr>)}</tbody>
+        <tfoot><tr><td>Total</td><td className="pos">{money(sum.income)}</td><td className="neg">{money(sum.expenses)}</td><td className={sum.income - sum.expenses < 0 ? 'neg' : 'pos'}>{money(sum.income - sum.expenses)}</td><td/></tr></tfoot></table></div>
+      <p className="xp-muted">Touche un mois pour ouvrir son journal.</p>
+    </section>
+    <section className="panel xp-panel"><div className="xp-panel-head"><h2>Budgets du mois</h2><button className="text-link" onClick={onBudgets}>Gérer</button></div>{budgets.slice(0, 4).map(b => <BudgetRow key={b.id} b={b} category={data.categories.find(c => c.id === b.categoryId)}/>)}{!budgets.length && <p className="xp-muted">Aucun budget défini.</p>}</section>
     <section className="panel xp-panel"><h2>À venir</h2>{upcoming.length ? <ul className="xp-list">{upcoming.map(r => <li key={r.id}><CalendarClock size={17}/><span className="xp-main"><strong>{r.name}</strong><small>{new Date(`${r.nextDate}T12:00:00`).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })}</small></span><span className="xp-amount neg">{money(r.amount)}</span></li>)}</ul> : <p className="xp-muted">Aucun paiement à venir.</p>}</section>
   </div>;
 }

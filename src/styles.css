@@ -336,3 +336,70 @@ button.bank-balance-card { width: 100%; border: 0; color: inherit; font: inherit
 .snapshot-main em{font-style:normal;font-weight:700}.snapshot-main em.pos{color:var(--green)}.snapshot-main em.neg{color:#d95151}
 .bank-balance-trigger,.bank-balance-trigger .bank-balance-value{color:#fff}
 .bank-balance-trigger .bank-balance-label,.bank-balance-trigger .bank-card-bottom span{color:#d4f5e6}
+
+/* ===== KELASI 2.3 — période, détail par catégorie, relevé mensuel ===== */
+.xp-period{display:flex;gap:4px;padding:6px 10px 10px;background:var(--xp-bar)}
+.xp-period button{flex:1;border:0;border-radius:10px;padding:8px;background:#ffffff14;color:#cfd8de;font-size:13px;font-weight:700;min-height:38px}
+.xp-period button.active{background:#fff;color:var(--xp-bar)}
+.xp-bar-label{font:600 16px 'DM Sans',sans-serif;padding:0 8px;white-space:nowrap}
+.xp-donut-btn{position:relative;border:0;background:transparent;padding:0;cursor:pointer;border-radius:50%}
+.xp-donut-btn:disabled{cursor:default}
+.xp-donut-btn:not(:disabled):hover .xp-donut{transform:scale(1.02)}
+.xp-donut{transition:transform .15s}
+.xp-donut-hint{position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);font-size:11px;font-weight:700;color:var(--xp-link);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:2px 9px;white-space:nowrap}
+.xp-cat-chip{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 10px 0;padding:7px 8px 7px 12px;border-radius:12px;background:var(--green-soft);color:var(--text);font-size:13px}
+.xp-cat-chip button{border:0;background:transparent;color:var(--muted);display:grid;place-items:center;width:30px;height:30px;border-radius:8px}
+.xp-bd{display:flex;flex-direction:column;gap:12px;padding:0 0 4px}
+.xp-bd-type{margin:0 18px}
+.xp-bd-total{display:flex;justify-content:space-between;align-items:baseline;padding:0 18px;font-size:14px;color:var(--muted)}
+.xp-bd-total strong{font:800 22px Manrope,sans-serif;font-variant-numeric:tabular-nums}
+.xp-bd-total .neg,.xp-bd .neg{color:var(--xp-neg)}.xp-bd-total .pos{color:var(--xp-pos)}
+.xp-bd ul{list-style:none;margin:0;padding:0;border-top:1px solid var(--border)}
+.xp-bd-row{position:relative;overflow:hidden;width:100%;display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:12px;min-height:66px;padding:8px 18px 8px 12px;border:0;border-bottom:1px solid var(--border);background:var(--surface);color:var(--text);text-align:left;font:inherit}
+.xp-bd-row:hover{background:var(--surface-2)}
+.xp-bd-fill{position:absolute;left:0;top:0;bottom:0;opacity:.16;pointer-events:none}
+.xp-bd-icon{position:relative;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;color:#fff}
+.xp-bd-icon .xp-glyph{color:#fff}
+.xp-bd-name{position:relative;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 6px;font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.02em;min-width:0}
+.xp-bd-name sup{font-size:10px;color:var(--green);font-weight:700}
+.xp-bd-name small{flex-basis:100%;font-size:11px;color:var(--muted);text-transform:none;font-weight:500;letter-spacing:0}
+.xp-bd-warn{color:#d9534f;font-size:13px}
+.xp-bd-amount{position:relative;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.xp-bd-amount b{font:500 24px 'DM Sans',sans-serif;font-variant-numeric:tabular-nums;letter-spacing:-.4px;white-space:nowrap}
+.xp-bd-amount b sup{font-size:12px;vertical-align:super;margin-left:1px}
+.xp-bd-amount small{font-size:11px;color:var(--muted);white-space:nowrap}
+.xp-bd>.xp-muted{padding:0 18px}
+.xp-pie-btn{display:block;width:100%;border:0;background:transparent;padding:0;text-align:left;color:inherit;font:inherit;cursor:pointer}
+.xp-wide{grid-column:1/-1}
+.xp-legend-inline{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.xp-legend-inline i,.xp-bar-pair i{display:inline-block;border-radius:3px}
+.xp-legend-inline i{width:10px;height:10px}
+.xp-legend-inline i.inc,.xp-bar-pair i.inc{background:#4ca68a}.xp-legend-inline i.exp,.xp-bar-pair i.exp{background:#dc806d}
+.xp-bars{display:flex;align-items:flex-end;gap:6px;height:190px;overflow-x:auto;padding:6px 2px 0;scrollbar-width:thin}
+.xp-bar-col{flex:0 0 42px;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;border:0;background:transparent;color:var(--muted);padding:0;border-radius:8px}
+.xp-bar-col:hover{background:var(--surface-2)}
+.xp-bar-pair{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;gap:3px}
+.xp-bar-pair i{width:13px;min-height:2px}
+.xp-bar-col small{font-size:10px;white-space:nowrap}
+.xp-statement-wrap{overflow-x:auto;max-height:420px;overflow-y:auto;border:1px solid var(--border);border-radius:12px}
+.xp-statement{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
+.xp-statement th,.xp-statement td{padding:9px 10px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--border)}
+.xp-statement th:first-child,.xp-statement td:first-child{text-align:left;text-transform:capitalize}
+.xp-statement thead th{position:sticky;top:0;background:var(--surface-2);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.xp-statement tbody tr{cursor:pointer}.xp-statement tbody tr:hover{background:var(--surface-2)}
+.xp-statement tfoot td{position:sticky;bottom:0;background:var(--surface-2);font-weight:800;border-bottom:0}
+.xp-statement .pos{color:var(--xp-pos)}.xp-statement .neg{color:var(--xp-neg)}
+@media(max-width:560px){
+  .xp-statement thead{display:none}
+  .xp-statement tr{display:grid;grid-template-columns:1fr 1fr 1fr;grid-template-areas:"m m n" "i e c";align-items:baseline;border-bottom:1px solid var(--border);padding:9px 12px;gap:3px 8px}
+  .xp-statement th,.xp-statement td{border:0;padding:0}
+  .xp-statement td:nth-child(1){grid-area:m;font-weight:700}
+  .xp-statement td:nth-child(2){grid-area:i;text-align:left;font-size:12px}
+  .xp-statement td:nth-child(3){grid-area:e;text-align:left;font-size:12px}
+  .xp-statement td:nth-child(4){grid-area:n;font-weight:800}
+  .xp-statement td:nth-child(5){grid-area:c;font-size:12px;color:var(--muted)}
+  .xp-statement td:nth-child(2)::before{content:'+'}
+  .xp-statement td:nth-child(3)::before{content:'−'}
+  .xp-statement tbody td:nth-child(5)::before{content:'cumul '}
+  .xp-statement tfoot tr{background:var(--surface-2)}
+}
